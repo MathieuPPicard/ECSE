@@ -30,17 +30,12 @@ namespace ECS
     struct ComponentStorage : IComponentStorage{
         std::vector<T> data;
 
-        void* get(size_t index) override{
-            return &data[index];
-        }
-        void addDefault() override{
-            data.emplace_back();
-        }
-        size_t size() override{
-            return data.size();
-        }
+        void* get(size_t index) override { return &data[index]; }
+        void addDefault() override { data.emplace_back(); }
+        size_t size() override { return data.size(); }
         template<typename... Args>
-        T& add(Args&&... args){   //To have acces to add, I need to cast into ComponentStorage<T>
+        //To have acces to add to cast into ComponentStorage<T>
+        T& add(Args&&... args){
             data.emplace_back(std::forward<Args>(args)...);
             return data.back();
         }
@@ -55,10 +50,7 @@ namespace ECS
     struct Archetype {
         ArchetypeId archetypeId;
         std::unordered_map<ComponentId, std::unique_ptr<IComponentStorage>> components;
-
-        bool has(index_t componentId){
-            return components.contains(componentId);
-        }
+        bool has(index_t componentId){ return components.contains(componentId); }
     };
     
     ////////////// Entity //////////////
@@ -90,121 +82,26 @@ namespace ECS
         std::unordered_map<ArchetypeId, Archetype> archetypes;
 
         // Register the wanted components
-        void registerNewComponent(ComponentRegister newRegister){
-            if(!isComponentRegister(newRegister.componentId)){
-                componentRegistry.push_back(std::move(newRegister));
-            }
-        }
-
-        bool isComponentRegister(index_t id){
-            for(auto registry : componentRegistry){
-                if(registry.componentId == id){
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        ComponentRegister getComponentRegister(index_t id){
-            for(auto registry: componentRegistry){
-                if(registry.componentId == id){
-                    return registry;
-                }
-            }
-            throw std::runtime_error("Invalid name of component in getComponentRegister() >> " + id);
-        }
+        void registerNewComponent(ComponentRegister newRegister);
+        bool isComponentRegister(index_t id);
+        ComponentRegister getComponentRegister(index_t id);
 
         // Creating entity
-        void createEntity(Entity newEntity){
-            index_t idArchetype = 0;
-            // If combinaison of component isnt already an Archetype
-            if(!findingMatchingArchetype(newEntity.componentsToAdd, &idArchetype)){
-                idArchetype = createNewArchetype(newEntity);  // Also add to the componentStorage
-            } 
-            addEntityToArchetype(newEntity, idArchetype);
-
-            // Metadata to be able to look for it
-            EntityMetada newMetaData {
-                .entityId = newEntity.entityId,
-                .archetpyeId = idArchetype,
-                .storageId = (index_t)(archetypes.at(newMetaData.archetpyeId).components.at(0)->size() - 1),
-            };
-            entitiesMetadata.insert({newEntity.entityId,std::move(newMetaData)});
-        }
-
-        void addEntityToArchetype(Entity& entity, index_t archetypeId){
-            for(auto comp : entity.componentsToAdd){
-                auto it = archetypes[archetypeId].components.find(comp.componentId);
-                if(it != archetypes[archetypeId].components.end()){
-                    it->second->addDefault();
-                }
-            }
-        }
-
-        bool findingMatchingArchetype(std::vector<ComponentRegister>& compoRegistry, index_t* outIndex){
-            // Safety: ensure the output pointer is valid
-            if (outIndex == nullptr) {
-                return false;
-            }
-            // Iterate over every existing archetype
-            for (size_t archIdx = 0; archIdx < archetypes.size(); ++archIdx) {
-                // Fast fail: if the number of components differs, they can't match
-                if (compoRegistry.size() != archetypes[archIdx].components.size()) {
-                    continue;
-                }
-                bool allFound = true;
-                // Check that every component in the registry exists in this archetype
-                for (const auto& reg : compoRegistry) {
-                    if (archetypes[archIdx].components.find(reg.componentId) ==
-                        archetypes[archIdx].components.end()) {
-                        allFound = false;
-                        break; // No need to check the rest of the registry
-                    }
-                }
-                // If every component matched, we found the archetype
-                if (allFound) {
-                    *outIndex = static_cast<index_t>(archIdx);
-                    return true;
-                }
-            }
-            // No archetype matched
-            return false;
-
-        }
-
-        index_t createNewArchetype(Entity& entity){
-            Archetype newArchetype;
-            index_t newId = getNextArchetypeId();
-            newArchetype.archetypeId = newId;
-            for(auto component : componentRegistry){
-                for(auto entityCompo : entity.componentsToAdd){
-                    if(component.componentId == entityCompo.componentId){
-                        newArchetype.components[component.componentId] = component.createStorage();        
-                    }
-                }
-            }
-            // Add it to the archetypes
-            archetypes[newId] = std::move(newArchetype);
-            return newId;
-        }
-
-        template<typename T>
+        void createEntity(Entity newEntity);
+        void addEntityToArchetype(Entity& entity, index_t archetypeId);
+        bool findingMatchingArchetype(std::vector<ComponentRegister>& compoRegistry, index_t* outIndex);
+        index_t createNewArchetype(Entity& entity);
+        
+        template<typename T>    //Templating function need to stay in .hpp so that the importing project can use it
         void setValue(index_t entityId, index_t componentId ,T value){
             EntityMetada md = entitiesMetadata.at(entityId);
-            if(archetypes.at(md.archetpyeId).has(componentId)){
-                ComponentStorage<T>* storage = dynamic_cast<ComponentStorage<T>*>(archetypes.at(md.archetpyeId).components.at(componentId).get());
+            if(archetype(md.archetpyeId).has(componentId)){
+                ComponentStorage<T>* storage = dynamic_cast<ComponentStorage<T>*>(archetype(md.archetpyeId).components.at(componentId).get());
                 T* data = static_cast<T*>(storage->get(md.storageId));
                 *data = std::move(value);
             }
         }
-
-        Archetype& archetype(index_t id){
-            if(id < nextArchetypeId){
-                return archetypes.at(id);
-            }
-            throw std::runtime_error("Invalid archetype id: " + id);
-        }
-
+        
         template<typename T>
         ECS::ComponentStorage<T>* storeComponent(index_t archetypeId, index_t componentId){
             if(archetype(archetypeId).has(componentId)){
@@ -215,16 +112,9 @@ namespace ECS
             throw std::runtime_error("Invalid component: " + std::to_string(componentId) + " for archetype: " + std::to_string(archetypeId)  + "\n");
         }
 
-        index_t getNextArchetypeId() {
-            return nextArchetypeId++;
-        }
-
-        index_t getNextEntityId() {
-            return nextEntityId++;
-        }
-
-        index_t getNextComponentId(){
-            return nextComponentId++;
-        }
+        Archetype& archetype(index_t id);
+        index_t getNextArchetypeId() { return nextArchetypeId++; }
+        index_t getNextEntityId() { return nextEntityId++; }
+        index_t getNextComponentId(){ return nextComponentId++; }
     }; 
 }
