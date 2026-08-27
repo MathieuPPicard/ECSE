@@ -9,6 +9,7 @@ add_library(ECSE
     src/ECS/Entity/EntityManager.cpp
 )
 target_include_directories(ECSE PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ECS
 )
 target_compile_features(ECSE PUBLIC cxx_std_20)
