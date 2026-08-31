@@ -39,7 +39,10 @@ namespace ECS
         }
 
         void remove(index_t idx) override{
-            storage.erase(storage.begin() + idx); 
+            if(idx != storage.size() - 1){
+                storage[idx] = std::move(storage.back());
+            }
+            storage.pop_back();
         }
         
         index_t count() override { return storage.size(); }
@@ -56,6 +59,8 @@ namespace ECS
 
     struct Archetype{
         std::unordered_map<std::type_index, std::unique_ptr<IStorage>> components;
+        std::vector<index_t> entities;
+        index_t archetypeId;
 
         template <typename T>
         index_t addOne(T&& data) {
@@ -115,11 +120,6 @@ namespace ECS
                 return static_cast<Storage<T>*>(it->second.get())->storage.at(idx);
             }
             throw std::runtime_error("Invalid Component Type for this Archetype.");          
-        }
-
-        template<typename T>
-        void remove(index_t idx){
-            getAllData<T>().remove(idx);           
         }
     
         template<typename T>

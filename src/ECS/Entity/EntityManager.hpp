@@ -10,7 +10,6 @@
 
 namespace ECS
 {
-
     struct EntityManager {
         index_t nextEntityId = 0;
         index_t nextArchetypeId = 0;
@@ -71,6 +70,11 @@ namespace ECS
             return result;
         }
 
+        template<typename Component>
+        void set(Entity entity, Component&& value){
+            entity.archetypePtr->getData<Component>(entity.storageIdx) = std::forward<Component>(value);
+        }
+
         template<typename... Components>
         index_t createEntity(Components... components) 
         {
@@ -85,6 +89,7 @@ namespace ECS
                 Archetype newArchetype;
                 storePos = newArchetype.add(std::forward<Components>(components)...);
                 index_t nextArchId = getNextArchetypeId();
+                newArchetype.archetypeId = nextArchId;
                 archetypes[nextArchId] = std::move(newArchetype);
                 archPtr = &archetypes.at(nextArchId);
             } else {
@@ -93,12 +98,23 @@ namespace ECS
             }
 
             // Create Entity(metadata) and add to entityMetadata
-            return addMetaData(archPtr, storePos);
+            index_t entityId = getNextEntityId();
+            archPtr->entities.push_back(entityId);
+            return addMetaData(entityId, archPtr, storePos);
         }
 
-        template<typename Component>
-        void set(Entity entity, Component&& value){
-            entity.archetypePtr->getData<Component>(entity.storageIdx) = std::forward<Component>(value);
+        void removeEntity(Entity& entity){
+            Archetype* oldArchetype = entity.archetypePtr;
+            const index_t oldStorPos = entity.storageIdx;
+
+            for(auto& [id, component] : oldArchetype->components){
+                component->remove(oldStorPos);
+            }
+            synchEntitiesMetaData(oldStorPos, *oldArchetype);
+            removeMetaData(entity.entityId);
+            if(oldArchetype->size() == 0){
+                archetypes.erase(oldArchetype->archetypeId);
+            }
         }
 
         template<typename T>
@@ -115,54 +131,130 @@ namespace ECS
             std::type_index newCompoSignature = typeid(T);
             signature.push_back(newCompoSignature);
 
-            index_t newPos = 0;
-            Archetype* newArchetypePtr = archetypeExists(&signature);
-            // Verify if the new signature already exist or not
-            if(newArchetypePtr != nullptr){
-                // Push the data in the already existing storage for each component
-                for(auto& [id,component] : oldArchetype->components){
-                    auto destinationIt = newArchetypePtr->components.find(id);
-                    if (destinationIt == newArchetypePtr->components.end()) {
-                        throw std::logic_error("Destination archetype is missing an existing component storage.");
-                    }
-                    component->moveElementTo(
-                        entity.storageIdx,
-                        *destinationIt->second
-                    );
+            moveEntityToArchetype(
+                entity,
+                std::move(signature),
+                nullptr,
+                [&data](Archetype& destination) {
+                    destination.add<T>(std::move(data));
                 }
-                newPos = newArchetypePtr->add<T>(std::move(data));
-            } else {
-                Archetype newArchetype;
-
-                for(auto& [id, component] : oldArchetype->components){
-                    newArchetype.components.emplace(
-                        id,
-                        component->moveElement(entity.storageIdx)
-                    );
-                }
-                // Add the new component
-                newPos = newArchetype.add<T>(std::move(data));
-
-
-                // Add the new archetype into archetypes
-                index_t nextArchId = getNextArchetypeId();
-                archetypes[nextArchId] = std::move(newArchetype);
-                newArchetypePtr = &archetypes.at(nextArchId);
-            }
-
-            index_t oldStorPos = entity.storageIdx;
-            // Modify metadata information with new information
-            entity.archetypePtr = newArchetypePtr;
-            entity.storageIdx = newPos;
-
-           for(auto& [id, component] : oldArchetype->components){
-                component->remove(oldStorPos);
-           }
+            );
         }
 
         template<typename T>
-        void removeComponent(Entity entity){
-            //TODO
+        void removeComponent(Entity& entity){
+            Archetype* oldArchetype = entity.archetypePtr;
+
+            if(!oldArchetype->has<T>()){
+                throw std::logic_error("Archetype/Entity doesn't have this component.");
+            }
+
+            std::vector<std::type_index> signature = oldArchetype->getSignature();
+            std::type_index toRemove = typeid(T);
+            for(size_t i = 0; i < signature.size(); i++){
+                if(signature[i] == toRemove){
+                    signature.erase(signature.begin() + i);
+                }
+            }
+
+            if(signature.size() == 0){
+                const index_t oldStorPos = entity.storageIdx;
+                for(auto& [id, component] : oldArchetype->components){
+                    component->remove(oldStorPos);
+                }
+                synchEntitiesMetaData(oldStorPos, *oldArchetype);
+                removeMetaData(entity.entityId);
+                if(oldArchetype->size() == 0){
+                    archetypes.erase(oldArchetype->archetypeId);
+                }
+                return;
+            }
+
+            const std::type_index removedComponent = typeid(T);
+            moveEntityToArchetype(
+                entity,
+                std::move(signature),
+                &removedComponent,
+                [](Archetype&) {}
+            );
+
+            if(oldArchetype->size() == 0){
+                archetypes.erase(oldArchetype->archetypeId);
+            }
+        }
+
+        template<typename PopulateDestination>
+        void moveEntityToArchetype(Entity& entity, std::vector<std::type_index> targetSignature,
+            const std::type_index* skippedComponent, PopulateDestination&& populateDestination)
+        {
+            Archetype* oldArchetype = entity.archetypePtr;
+            const index_t oldStoragePos = entity.storageIdx;
+
+            Archetype* destination = archetypeExists(&targetSignature);
+            index_t destinationPos = 0;
+
+            if(destination == nullptr){
+                Archetype newArchetype;
+
+                for(auto& [type, storage] : oldArchetype->components){
+                    if(skippedComponent != nullptr && type == *skippedComponent){
+                        continue;
+                    }
+                    newArchetype.components.emplace(
+                        type,
+                        storage->moveElement(oldStoragePos)
+                    );
+                }
+
+                const index_t archetypeId = getNextArchetypeId();
+                newArchetype.archetypeId = archetypeId;
+                archetypes[archetypeId] = std::move(newArchetype);
+                destination = &archetypes.at(archetypeId);
+            } else {
+                // Before moving any data, all destination storages are aligned.
+                // This is the row that the transitioning entity will occupy.
+                destinationPos = destination->size();
+
+                for(auto& [type, storage] : oldArchetype->components){
+                    if(skippedComponent != nullptr && type == *skippedComponent){
+                        continue;
+                    }
+
+                    auto destinationStorage = destination->components.find(type);
+                    if(destinationStorage == destination->components.end()){
+                        throw std::logic_error("Destination archetype is missing an existing component storage.");
+                    }
+                    storage->moveElementTo(oldStoragePos, *destinationStorage->second);
+                }
+            }
+
+            std::forward<PopulateDestination>(populateDestination)(*destination);
+
+            // Adding a component must extend every destination storage by one row.
+            if(destination->size() != destinationPos + 1){
+                throw std::logic_error("Destination archetype component storages are misaligned");
+            }
+
+            destination->entities.push_back(entity.entityId);
+            entity.archetypePtr = destination;
+            entity.storageIdx = destinationPos;
+
+            for(auto& [type, storage] : oldArchetype->components){
+                storage->remove(oldStoragePos);
+            }
+            synchEntitiesMetaData(oldStoragePos, *oldArchetype);
+        }
+
+        void synchEntitiesMetaData(index_t removePos, Archetype& oldArchetype){
+            const index_t last = oldArchetype.entities.size() - 1;
+            const index_t movedEntityId = oldArchetype.entities[last];
+
+            if(removePos != last){
+                oldArchetype.entities.at(removePos) = movedEntityId;
+                entityMetadata[movedEntityId].storageIdx = removePos;
+            }
+
+            oldArchetype.entities.pop_back();
         }
 
         ECS::Entity* entity(index_t entityIdx){
@@ -188,15 +280,17 @@ namespace ECS
             return nullptr;
         }
 
-        index_t addMetaData(Archetype* archPtr, index_t storagePos){
-
-            index_t entityId = getNextEntityId();
+        index_t addMetaData(index_t entityId, Archetype* archPtr, index_t storagePos){
             entityMetadata[entityId] = std::move(Entity{
                 .entityId = entityId,
                 .archetypePtr= archPtr,
                 .storageIdx = storagePos
             });
             return entityId;
+        }
+
+        void removeMetaData(index_t entityId){
+            entityMetadata.erase(entityId);
         }
 
         index_t getNextEntityId() { return nextEntityId++; }
