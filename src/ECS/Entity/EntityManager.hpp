@@ -2,17 +2,19 @@
 #include "Archetype.hpp"
 #include "Type.hpp"
 #include "Entity.hpp"
+#include "IdQueue.hpp"
 #include <iostream>
 #include <unordered_map>
 #include <vector>
+#include <queue>
 #include <algorithm>
 #include <typeindex>
 
 namespace ECS
 {
     struct EntityManager {
-        index_t nextEntityId = 0;
-        index_t nextArchetypeId = 0;
+        IdQueue<index_t> entityIdQueue;
+        IdQueue<index_t> archetypeIdQueue;
         std::unordered_map<index_t, Archetype> archetypes;
         std::unordered_map<index_t, Entity> entityMetadata;
 
@@ -113,6 +115,7 @@ namespace ECS
             synchEntitiesMetaData(oldStorPos, *oldArchetype);
             removeMetaData(entity.entityId);
             if(oldArchetype->size() == 0){
+                archetypeIdQueue.removeId(oldArchetype->archetypeId);
                 archetypes.erase(oldArchetype->archetypeId);
             }
         }
@@ -165,6 +168,7 @@ namespace ECS
                 synchEntitiesMetaData(oldStorPos, *oldArchetype);
                 removeMetaData(entity.entityId);
                 if(oldArchetype->size() == 0){
+                    archetypeIdQueue.removeId(oldArchetype->archetypeId);
                     archetypes.erase(oldArchetype->archetypeId);
                 }
                 return;
@@ -179,6 +183,7 @@ namespace ECS
             );
 
             if(oldArchetype->size() == 0){
+                archetypeIdQueue.removeId(oldArchetype->archetypeId);
                 archetypes.erase(oldArchetype->archetypeId);
             }
         }
@@ -290,10 +295,11 @@ namespace ECS
         }
 
         void removeMetaData(index_t entityId){
+            entityIdQueue.removeId(entityId);
             entityMetadata.erase(entityId);
         }
 
-        index_t getNextEntityId() { return nextEntityId++; }
-        index_t getNextArchetypeId() { return nextArchetypeId++; }
+        index_t getNextEntityId() { return entityIdQueue.getNextId(); }
+        index_t getNextArchetypeId() { return archetypeIdQueue.getNextId(); }
     };
 }
