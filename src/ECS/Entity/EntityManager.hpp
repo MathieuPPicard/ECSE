@@ -2,7 +2,7 @@
 #include "Archetype.hpp"
 #include "Type.hpp"
 #include "Entity.hpp"
-#include "IdQueue.hpp"
+#include "../IdQueue.hpp"
 #include <iostream>
 #include <unordered_map>
 #include <vector>
@@ -41,14 +41,14 @@ namespace ECS
         }
 
         template<typename... T>
-        std::vector<Archetype*> hasAll(){
+        std::vector<ECS::Archetype*> hasAll(){
             std::vector<Archetype*> result;
             std::vector<std::type_index> wanted = {typeid(T)...};
 
             for(auto& [id,archetype] : archetypes){
                 std::vector<std::type_index> currSignature = archetype.getSignature();
                 if(wanted.size() != currSignature.size()){
-                    return result;
+                    continue;
                 }
 
                 bool allMatch = true;
@@ -73,8 +73,8 @@ namespace ECS
         }
 
         template<typename Component>
-        void set(Entity entity, Component&& value){
-            entity.archetypePtr->getData<Component>(entity.storageIdx) = std::forward<Component>(value);
+        void modifyEntity(Entity entity, Component&& value){
+            *entity.archetypePtr->getData<Component>(entity.storageIdx) = std::forward<Component>(value);
         }
 
         template<typename... Components>

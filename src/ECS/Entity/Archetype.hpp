@@ -114,10 +114,10 @@ namespace ECS
         }
 
         template<typename T>
-        T& getData(index_t idx){
+        T* getData(index_t idx){
             auto it = components.find(typeid(T));
             if(it != components.end()){
-                return static_cast<Storage<T>*>(it->second.get())->storage.at(idx);
+                return &static_cast<Storage<T>*>(it->second.get())->storage.at(idx);
             }
             throw std::runtime_error("Invalid Component Type for this Archetype.");          
         }
@@ -129,7 +129,7 @@ namespace ECS
 
         template<typename Component>
         void set(index_t pos, Component&& value){
-            getData<Component>(pos) = std::forward<Component>(value);
+            *getData<Component>(pos) = std::forward<Component>(value);
         }
 
         std::vector<std::type_index> getSignature(){
